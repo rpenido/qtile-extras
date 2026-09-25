@@ -60,6 +60,7 @@ widgets = {
     "Syncthing": "syncthing",
     "Systray": "systray",
     "Tetris": "tetris",
+    "Timewarrior": "timewarrior",
     "TVHWidget": "tvheadend",
     "UnitStatus": "unitstatus",
     "UPowerWidget": "upower",
