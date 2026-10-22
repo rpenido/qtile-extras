@@ -18,6 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 import json
+import shutil
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -204,7 +205,8 @@ class Timewarrior(base.BackgroundPoll):
     hide them.
 
     Requires the ``timew`` binary from Timewarrior to be installed and
-    available on the path.
+    available on the path. If the binary cannot be found the widget stays
+    hidden and stops polling.
     """
 
     orientations = base.ORIENTATION_HORIZONTAL
@@ -219,6 +221,9 @@ class Timewarrior(base.BackgroundPoll):
         base.BackgroundPoll.__init__(self, "", **config)
         self.add_defaults(Timewarrior.defaults)
         self._error_logged = False
+        # Resolved on the first poll so that the check reflects the environment
+        # of the Qtile process rather than the one that created the widget.
+        self._timew_available: bool | None = None
         self.tracking = False
         self.tags: list[str] = []
         self.tracked = 0.0
@@ -226,17 +231,30 @@ class Timewarrior(base.BackgroundPoll):
 
         self.add_callbacks({"Button1": self.force_update})
 
-    async def apoll(self) -> str:
+    async def apoll(self) -> str | None:
         """Fetch the current Timewarrior status and return the text to display."""
+        if self._timew_available is None:
+            self._timew_available = shutil.which(self.timew_cmd) is not None
+            if not self._timew_available:
+                logger.warning(
+                    "Could not find '%s'. Is Timewarrior installed? The widget will stay hidden.",
+                    self.timew_cmd,
+                )
+
+        if not self._timew_available:
+            # Returning None stops BackgroundPoll from rescheduling the poll.
+            return None
+
         command = [self.timew_cmd, "export", ":today"]
 
         try:
             raw = await acall_process(command)
         except FileNotFoundError:
+            # The binary was available at startup but has since disappeared.
             if not self._error_logged:
                 logger.warning("Could not find '%s'. Is Timewarrior installed?", self.timew_cmd)
                 self._error_logged = True
-            return self.status
+            return None
 
         try:
             intervals = json.loads(raw)

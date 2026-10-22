@@ -80,7 +80,7 @@ def twdb(monkeypatch):
     forked process and so cannot share state with the test process.
     """
 
-    def factory(payload=EXPORT_EMPTY, error=None, call_log=None):
+    def factory(payload=EXPORT_EMPTY, error=None, call_log=None, which="/usr/bin/timew"):
         async def mock_acall_process(command, shell=False):
             if call_log is not None:
                 with open(call_log, "a") as log:
@@ -90,6 +90,9 @@ def twdb(monkeypatch):
             return payload
 
         monkeypatch.setattr(timewarrior, "acall_process", mock_acall_process)
+        # The widget checks that the binary exists before polling, so pin the
+        # result to keep the tests independent of the host.
+        monkeypatch.setattr(timewarrior.shutil, "which", lambda cmd: which)
 
     return factory
 
@@ -413,8 +416,19 @@ def test_timewarrior_custom_icons(twdb, frozen_time, manager_nospawn, timewarrio
     status_is(manager_nospawn, "[ SpanTag · 33:14:42 ] 10:14:42")
 
 
-def test_timewarrior_missing_binary(twdb, manager_nospawn, timewarriorconfig):
-    """A missing timew binary is logged once and the widget keeps its text."""
+def test_timewarrior_missing_binary(twdb, manager_nospawn, timewarriorconfig, tmp_path):
+    """A missing timew binary hides the widget without ever polling."""
+    logfile = tmp_path / "timew-calls.log"
+    twdb(call_log=logfile, which=None)
+    manager_nospawn.start(timewarriorconfig)
+
+    assert manager_nospawn.c.widget["timewarrior"].eval("self.status") == ""
+    # No attempt was made to run the binary.
+    assert not logfile.exists()
+
+
+def test_timewarrior_binary_removed(twdb, manager_nospawn, timewarriorconfig):
+    """If timew disappears at runtime the widget keeps its text and stops polling."""
     twdb(error=FileNotFoundError())
     manager_nospawn.start(timewarriorconfig)
 
